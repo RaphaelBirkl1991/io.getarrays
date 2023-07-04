@@ -1,0 +1,24 @@
+jwt:
+  secret: mysupercomplexsecret
+spring:
+#  autoconfigure:
+#    exclude: org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+  datasource:
+    url: jdbc:mysql://localhost:3306/securecapita
+    username: raphael
+    password: pass
+  jpa:
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    generate-ddl: true
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        globally_quoted_identifiers: true
+        dialect:
+        format_sql: true
+  sql:
+    init:
+      mode: never
+      continue-on-error: false
