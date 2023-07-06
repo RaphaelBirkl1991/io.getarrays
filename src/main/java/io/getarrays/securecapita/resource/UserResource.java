@@ -9,13 +9,14 @@ import io.getarrays.securecapita.form.LoginForm;
 import io.getarrays.securecapita.provider.TokenProvider;
 import io.getarrays.securecapita.service.RoleService;
 import io.getarrays.securecapita.service.UserService;
+import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -26,6 +27,7 @@ import java.util.Map;
 import static io.getarrays.securecapita.dtomapper.UserDTOMapper.toUser;
 import static io.getarrays.securecapita.utils.ExceptionUtils.processError;
 import static java.time.LocalTime.now;
+import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.http.HttpStatus.*;
 import static org.springframework.security.authentication.UsernamePasswordAuthenticationToken.unauthenticated;
 
@@ -40,6 +42,7 @@ public class UserResource {
     private final TokenProvider tokenProvider;
     private final HttpServletRequest request;
     private final HttpServletResponse response;
+    public static final String TOKEN_PREFIX = "Bearer ";
 
 
     @PostMapping("/login")
@@ -54,7 +57,7 @@ private UserDTO getAuthenticatedUser(Authentication authentication){
         return ((UserPrincipal) authentication.getPrincipal()).getUser();
 }
 
-    @PostMapping("/register")
+    @PostMapping(path = "/register", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<HttpResponse> saveUser(@RequestBody @Valid User user) {
         UserDTO userDTO = userService.createUser(user);
         return ResponseEntity.created(getUri()).body(
@@ -79,7 +82,7 @@ private UserDTO getAuthenticatedUser(Authentication authentication){
                         .statusCode(OK.value())
                         .build());
     }
-
+    //START - to reset password when user is not logged in
     @GetMapping("/verify/code/{email}/{code}")
     public ResponseEntity<HttpResponse> verifyCode(@PathVariable("email") String email, @PathVariable("code") String code){
         UserDTO user = userService.verifyCode(email, code);
@@ -95,6 +98,98 @@ private UserDTO getAuthenticatedUser(Authentication authentication){
     }
 
 
+    @GetMapping("/resetpassword/{email}")
+    public ResponseEntity<HttpResponse> resetPassword(@PathVariable("email") String email) {
+        userService.resetPassword(email);
+        return ResponseEntity.ok().body(
+                HttpResponse.builder()
+                        .timeStamp(now().toString())
+                        .message("Email sent. Please check your Emails to reset the password.")
+                        .status(OK)
+                        .statusCode(OK.value())
+                        .build());
+    }
+
+
+    @GetMapping("/verify/password/{key}")
+    public ResponseEntity<HttpResponse> resetPasswordWithKey(@PathVariable("key") String key) {
+        UserDTO user = userService.verifyPasswordKey(key);
+        return ResponseEntity.ok().body(
+                HttpResponse.builder()
+                        .timeStamp(now().toString())
+                        .data(Map.of("user", user))
+                        .message("Please enter a new Password")
+                        .status(OK)
+                        .statusCode(OK.value())
+                        .build());
+    }
+
+    @PostMapping("/resetpassword/{key}/{password}/{confirmPassword}")
+    public ResponseEntity<HttpResponse> resetPasswordWithKey(@PathVariable("key") String key, @PathVariable("password") String password,
+                                                             @PathVariable("confirmPassword") String confirmPassword) {
+        userService.renewPassword(key, password, confirmPassword);
+        return ResponseEntity.ok().body(
+                HttpResponse.builder()
+                        .timeStamp(now().toString())
+                        .message("Password reset successfully.")
+                        .status(OK)
+                        .statusCode(OK.value())
+                        .build());
+    }
+
+
+    // END - to reset password when user is not logged in
+
+
+
+    @GetMapping("/verify/account/{key}")
+    public ResponseEntity<HttpResponse> verifyAccount(@PathVariable("key") String key){
+        UserDTO user = userService.verifyAccountKey(key);
+        return ResponseEntity.ok().body(
+                HttpResponse.builder()
+                        .timeStamp(now().toString())
+                        .message(userService.verifyAccountKey(key).isEnabled() ? "Account already verified" : "Account verified")
+                        .status(OK)
+                        .statusCode(OK.value())
+                        .build());
+    }
+
+    @GetMapping("/refresh/token")
+    public ResponseEntity<HttpResponse> refreshToken(HttpServletRequest request) {
+        if (isHeaderAndTokenValid(request)) {
+            String token = request.getHeader(AUTHORIZATION).substring(TOKEN_PREFIX.length());
+            UserDTO user = userService.getUserByEmail(tokenProvider.getSubject(token, request));
+            return ResponseEntity.ok().body(
+                    HttpResponse.builder()
+                            .timeStamp(now().toString())
+                            .data(Map.of("user", user, "access_token", tokenProvider.createAccessToken(getUserPrincipal(user))
+                                    , "refresh_token", token))
+                            .message("Token refresh")
+                            .status(OK)
+                            .statusCode(OK.value())
+                            .build());
+        } else {
+            return ResponseEntity.badRequest().body(
+                    HttpResponse.builder()
+                            .timeStamp(now().toString())
+                            .reason("Refresh Token  missing or invalid")
+                            .developerMessage("Refresh Token missing or invalid")
+                            .status(BAD_REQUEST)
+                            .statusCode(BAD_REQUEST.value())
+                            .build());
+        }
+    }
+    private boolean isHeaderAndTokenValid(HttpServletRequest request) {
+        return request.getHeader(AUTHORIZATION) != null
+                && request.getHeader(AUTHORIZATION).startsWith(TOKEN_PREFIX)
+                && tokenProvider.isTokenValid(
+                        //email
+                        tokenProvider.getSubject(request.getHeader(AUTHORIZATION).substring(TOKEN_PREFIX.length()), request),
+                       // token
+                        request.getHeader(AUTHORIZATION).substring(TOKEN_PREFIX.length())
+        );
+    }
+
     @RequestMapping("/error")
     public ResponseEntity<HttpResponse> handleError(HttpServletRequest request){
         return ResponseEntity.badRequest().body(
@@ -105,12 +200,6 @@ private UserDTO getAuthenticatedUser(Authentication authentication){
                         .statusCode(BAD_REQUEST.value())
                         .build());
     }
-
-
-
-
-
-
 
 
 
@@ -156,6 +245,4 @@ private UserDTO getAuthenticatedUser(Authentication authentication){
             throw new ApiException(exception.getMessage());
         }
     }
-
-
 }
